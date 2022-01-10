@@ -9,10 +9,9 @@ __all__ = ["_BaseWindowForecaster"]
 import numpy as np
 import pandas as pd
 
-from sktime.forecasting.base._base import BaseForecaster
-from sktime.forecasting.base._base import DEFAULT_ALPHA
-from sktime.forecasting.model_selection import CutoffSplitter
-from sktime.forecasting.model_selection import SlidingWindowSplitter
+from sktime.datatypes._panel._convert import _get_time_index
+from sktime.forecasting.base._base import DEFAULT_ALPHA, BaseForecaster
+from sktime.forecasting.model_selection import CutoffSplitter, SlidingWindowSplitter
 from sktime.utils.datetime import _shift
 from sktime.utils.validation.forecasting import check_cv
 
@@ -20,10 +19,12 @@ from sktime.utils.validation.forecasting import check_cv
 class _BaseWindowForecaster(BaseForecaster):
     """Base class for forecasters that use sliding windows."""
 
-    def __init__(self, window_length=None):
+    def __init__(self, window_length=None, transformers=None):
         super(_BaseWindowForecaster, self).__init__()
         self.window_length = window_length
         self.window_length_ = None
+        self.transformers = transformers
+        self.transformers_ = None
 
     def update_predict(
         self,
@@ -55,6 +56,7 @@ class _BaseWindowForecaster(BaseForecaster):
             cv = SlidingWindowSplitter(
                 self.fh.to_relative(self.cutoff),
                 window_length=self.window_length_,
+                transformers=self.transformers_,
                 start_with_window=False,
             )
         return self._predict_moving_cutoff(
@@ -90,30 +92,6 @@ class _BaseWindowForecaster(BaseForecaster):
                 fh.to_out_of_sample(self.cutoff), **kwargs
             )
             return y_ins.append(y_oos)
-
-    def _predict_fixed_cutoff(
-        self, fh, X=None, return_pred_int=False, alpha=DEFAULT_ALPHA
-    ):
-        """Make single-step or multi-step fixed cutoff predictions.
-
-        Parameters
-        ----------
-        fh : np.array
-            all positive (> 0)
-        X : pd.DataFrame
-        return_pred_int : bool
-        alpha : float or array-like
-
-        Returns
-        -------
-        y_pred = pd.Series
-        """
-        # assert all(fh > 0)
-        y_pred = self._predict_last_window(
-            fh, X, return_pred_int=return_pred_int, alpha=alpha
-        )
-        index = fh.to_absolute(self.cutoff)
-        return pd.Series(y_pred, index=index)
 
     def _predict_in_sample(
         self, fh, X=None, return_pred_int=False, alpha=DEFAULT_ALPHA
@@ -164,20 +142,6 @@ class _BaseWindowForecaster(BaseForecaster):
         y_pred : np.array
         """
         raise NotImplementedError("abstract method")
-
-    def _get_last_window(self):
-        """Select last window."""
-        # Get the start and end points of the last window.
-        cutoff = self.cutoff
-        start = _shift(cutoff, by=-self.window_length_ + 1)
-
-        # Get the last window of the endogenous variable.
-        y = self._y.loc[start:cutoff].to_numpy()
-
-        # If X is given, also get the last window of the exogenous variables.
-        X = self._X.loc[start:cutoff].to_numpy() if self._X is not None else None
-
-        return y, X
 
     @staticmethod
     def _predict_nan(fh):
