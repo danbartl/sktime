@@ -982,10 +982,6 @@ class BaseForecaster(BaseEstimator):
         # compatibility checks between X and y
         if X is not None and y is not None:
             if self.get_tag("X-y-must-have-same-index"):
-<<<<<<< HEAD
-                check_equal_time_index(X, y, mode="contains")
-        # end checking X
-=======
                 check_equal_time_index(X, y)
 
             if y_scitype != X_scitype:
@@ -995,7 +991,6 @@ class BaseForecaster(BaseEstimator):
         # todo: add tests that :
         #   y_inner_scitype are same as X_inner_scitype
         #   y_inner_scitype always includes "less index" scitypes
->>>>>>> 282e2906ba0411f2a9d5f3491ee797c2d6e79aba
 
         # convert X & y to supported inner type, if necessary
         #####################################################
@@ -1003,16 +998,6 @@ class BaseForecaster(BaseEstimator):
         # convert X and y to a supported internal mtype
         #  it X/y mtype is already supported, no conversion takes place
         #  if X/y is None, then no conversion takes place (returns None)
-<<<<<<< HEAD
-        y_inner_mtype = self.get_tag("y_inner_mtype")
-        y_inner = convert_to(
-            y,
-            to_type=y_inner_mtype,
-            as_scitype="Series",  # we are dealing with series
-            store=self._converter_store_y,
-            store_behaviour="reset",
-        )
-=======
         #  if vectorization is required, we wrap in Vect
 
         if not requires_vectorization:
@@ -1023,7 +1008,6 @@ class BaseForecaster(BaseEstimator):
                 as_scitype=y_scitype,  # we are dealing with series
                 store=self._converter_store_y,
             )
->>>>>>> 282e2906ba0411f2a9d5f3491ee797c2d6e79aba
 
             # converts X, converts None to None if X is None
             X_inner = convert_to(
