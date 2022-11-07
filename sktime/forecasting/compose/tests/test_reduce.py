@@ -557,3 +557,39 @@ def test_dirrec_against_recursive_accumulated_error():
     assert mean_absolute_percentage_error(
         y_test, preds_dirrec
     ) < mean_absolute_percentage_error(y_test, preds_recursive)
+
+
+def test_direct_vs_recursive():
+    """Test reduction forecasters.
+
+    Test reduction forecasters by making prediction
+    on airline dataset using linear estimators.
+    Wenn discard_maxfh = False, all observations should be considered (see
+    documenation in make_reduction function), so results for direct and recursive
+    forecasting should match for the first forecasting horizon.
+    With the discard_maxfh
+    """
+    y = load_airline()
+    y_train, y_test = temporal_train_test_split(y, test_size=24)
+    fh = ForecastingHorizon(y_test.index, is_relative=False)
+    forecaster_dir_max = DirectTabularRegressionForecaster(
+        LinearRegression(), discard_maxfh=False
+    )
+    forecaster_dir_spec = DirectTabularRegressionForecaster(
+        LinearRegression(), discard_maxfh=True
+    )
+    forecaster_rec_max = RecursiveTabularRegressionForecaster(
+        LinearRegression(), discard_maxfh=False
+    )
+    forecaster_rec_spec = RecursiveTabularRegressionForecaster(
+        LinearRegression(), discard_maxfh=True
+    )
+
+    pred_dir_max = forecaster_dir_max.fit(y_train, fh=fh).predict(fh)
+    pred_dir_spec = forecaster_dir_spec.fit(y_train, fh=fh).predict(fh)
+    pred_rec_max = forecaster_rec_max.fit(y_train, fh=fh).predict(fh)
+    pred_rec_spec = forecaster_rec_spec.fit(y_train, fh=fh).predict(fh)
+
+    assert pred_dir_max.head(1).equals(pred_rec_max.head(1))
+    assert pred_dir_max.head(1).equals(pred_rec_spec.head(1))
+    assert not pred_dir_max.head(1).equals(pred_dir_spec.head(1))
