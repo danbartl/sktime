@@ -46,9 +46,8 @@ import pandas as pd
 from sktime.datatypes._series._check import check_pddataframe_series
 from sktime.utils.validation.series import is_integer_index
 
-# Currently datetimeindex is not supported dure to not having a freq argument
-VALID_MULTIINDEX_TYPES = (pd.RangeIndex, pd.Index, pd.PeriodIndex)
-VALID_INDEX_TYPES = (pd.RangeIndex, pd.PeriodIndex, pd.DatetimeIndex, pd.TimedeltaIndex)
+VALID_MULTIINDEX_TYPES = (pd.RangeIndex, pd.Index)
+
 
 def is_in_valid_multiindex_types(x) -> bool:
     """Check that the input type belongs to the valid multiindex types."""
@@ -153,20 +152,12 @@ check_dict[("numpy3D", "Panel")] = check_numpy3d_panel
 
 def check_pdmultiindex_panel(obj, return_metadata=False, var_name="obj"):
 
-    from sktime.datatypes._series._check import _index_equally_spaced
-    from sktime.datatypes._series._check import is_in_valid_index_types
-    from sktime.datatypes._utilities import get_time_index
-    
-    index = obj.index
-    time_index = index.get_level_values(-1)
-    instind = index.get_level_values(0).unique()
-    
     if not isinstance(obj, pd.DataFrame):
         msg = f"{var_name} must be a pd.DataFrame, found {type(obj)}"
         return _ret(False, msg, None, return_metadata)
 
-    if not isinstance(index, pd.MultiIndex):
-        msg = f"{var_name} must have a MultiIndex, found {type(index)}"
+    if not isinstance(obj.index, pd.MultiIndex):
+        msg = f"{var_name} must have a MultiIndex, found {type(obj.index)}"
         return _ret(False, msg, None, return_metadata)
 
     # check that columns are unique
@@ -175,33 +166,13 @@ def check_pdmultiindex_panel(obj, return_metadata=False, var_name="obj"):
         return _ret(False, msg, None, return_metadata)
 
     # check that there are precisely two index levels
-    nlevels = index.nlevels
+    nlevels = obj.index.nlevels
     if not nlevels == 2:
         msg = f"{var_name} must have a MultiIndex with 2 levels, found {nlevels}"
         return _ret(False, msg, None, return_metadata)
 
-    # check whether the time index is of valid type
-    if not (isinstance(time_index, VALID_INDEX_TYPES) or is_integer_index(time_index)):
-        raise TypeError(f"index must be one of {VALID_INDEX_TYPES} or integer index")
-
-    # check that no dtype is object
-    if "object" in obj.dtypes.values:
-        msg = f"{var_name} should not have column of 'object' dtype"
-        return ret(False, msg, None, return_metadata)
-    
-    # Check time index is has frequency
-    # Therefore also is ordered in time and equally spaced
-    def freq_not_none(obj):
-        """Check that freq is not None"""
-        return obj.index.get_level_values(-1).freq is not None
-
-    if isinstance(index, pd.PeriodIndex):
-        freq_check = obj.groupby(level=0).apply(lambda df: check_freq(df)).any()
-        if freq_check is False:          
-            msg = f"{var_name} has DatetimeIndex, but no freq attribute set."
-            return ret(False, msg, None, return_metadata)
-
     # check instance index being integer or range index
+    instind = obj.index.get_level_values(0)
     if not is_in_valid_multiindex_types(instind):
         msg = (
             f"instance index (first/highest index) must be {VALID_MULTIINDEX_TYPES}, "
@@ -209,95 +180,27 @@ def check_pdmultiindex_panel(obj, return_metadata=False, var_name="obj"):
         )
         return _ret(False, msg, None, return_metadata)
 
-    inst_inds = index.get_level_values(0).unique()
-    inst_inds = np.unique(index.get_level_values(0))
-   
+    inst_inds = obj.index.get_level_values(0).unique()
+    # inst_inds = np.unique(obj.index.get_level_values(0))
 
-    def np_all_old(index):
-        diffs = np.diff(index)
-        all_equal = np.all(diffs == diffs[0])
-        return all_equal
-    
-    def np_all_old_df(X):
-        diffs = np.diff(X)
-        all_equal = np.all(diffs == diffs[0])
-        return all_equal
-    
-    import polars as pl
-        
-    timeit.timeit(lambda: obj.reset_index(-1).groupby(level="time_series").apply(lambda df: np_all(df["date"])), number =1)
-    timeit.timeit(lambda: obj.groupby(level="time_series").apply(lambda df: np_all_new(df.index.get_level_values(-1))), number =1)
-    timeit.timeit(lambda: objpl.groupby("time_series").agg(pl.col("date2").diff().slice(1).unique().len()), number =1)
-    timeit.timeit(lambda: [check_pddataframe_series(obj.loc[i], return_metadata=True) for i in inst_inds], number =1)
-    timeit.timeit(lambda: [_index_equally_spaced(obj.loc[i].index) for i in inst_inds], number =1)
-    
-    timeit.timeit(lambda: obj.groupby(level="time_series", as_index=False).apply(lambda df: np_all_new(df.index.get_level_values(-1))), number =1)
-    
-    from joblib import Parallel, delayed
-    import multiprocessing
-    
-    def tmpFunc(df):
-        df['c'] = df.a + df.b
-        return df
+    check_res = [
+        check_pddataframe_series(obj.loc[i], return_metadata=True) for i in inst_inds
+    ]
+    bad_inds = [i for i in range(len(inst_inds)) if not check_res[i][0]]
 
-    def applyParallel(dfGrouped, func):
-        retLst = Parallel(n_jobs=multiprocessing.cpu_count())(delayed(func)(group) for name, group in dfGrouped)
-        return pd.concat(retLst)
-
-    applyParallel(obj.groupby(df.index), tmpFunc)
-    
-    obj2 = obj.reset_index()
-    obj3 = obj2[["date","time_series"]]
-    
-    obj3.sort_values(['time_series', 'date'], inplace=True)
-    # for this example, with diff, I think this syntax is a bit clunky
-    # but for more general examples, this should be good.  But can we do better?
-    df['diffs'] = obj3.groupby(['time_series'])['date'].transform(lambda x: x.diff()) 
-
-    df.sort_index(inplace=True)
-
-    obj2["date2"] = obj2["date"].dt.to_timestamp()
-    objpl = pl.DataFrame(obj2.drop(["date"], axis = "columns"))
-    
-    outgone = objpl.groupby("time_series").agg(pl.col("date2").diff().slice(1).unique().len())
-    
-    timeit.timeit(lambda: objpl.groupby("time_series").agg(pl.col("date2").diff().slice(1).unique().len()), number =1)
-    
-    #import timeit
-    
-    #check_res2 = [check_pddataframe_series(obj.loc[i], return_metadata=True) for i in inst_inds]
-#    
-    #timeit.timeit(lambda: [check_pddataframe_series(obj.loc[i], return_metadata=True) for i in inst_inds], number=1)
-    #timeit.timeit(lambda: obj.reset_index(-1).groupby(level="time_series").apply(lambda df: check_pddataframe_series(df.set_index(obj.index.names[-1]))), number=1)
-    
-
-    
-    #check_res = obj.reset_index(-1).groupby(level="time_series").apply(lambda df: pd.DataFrame(check_pddataframe_series(df.set_index(obj.index.names[-1]), return_metadata=True)))
-    
-    #if FREQ_SET_CHECK = False:
-    
-    
-    # Do we need to check for equally spaced indexes? If there is a RangeIndex no,
-    # if there is a PeriodIndex we check for freq so also no
-    # We do not support DateTimeIndex since they do not support freq
-    # #obj.groupby(level="time_series").apply(lambda df: _index_equally_spaced(df.index.get_level_values(-1)))
-    
-    # bad_inds = [i for i in range(len(inst_inds)) if not check_res[i][0]]
-    # bad_inds = check_res.to_frame(name="check")
-
-    # if len(bad_inds.loc[bad_inds["check"] ==False].shape[0]) > 0:
-    #     msg = (
-    #         f"{var_name}.loc[i] must be Series of mtype pd.DataFrame,"
-    #         f" not at i"
-    #     )
-    #     return _ret(False, msg, None, return_metadata)
-
+    if len(bad_inds) > 0:
+        msg = (
+            f"{var_name}.loc[i] must be Series of mtype pd.DataFrame,"
+            f" not at i={bad_inds}"
+        )
+        return _ret(False, msg, None, return_metadata)
 
     metadata = dict()
-    if len(obj.shape) == 2:
-        # we now know obj is a 2D np.ndarray
-        metadata["is_empty"] = len(obj) < 1 or obj.shape[1] < 1
-        metadata["is_univariate"] = obj.shape[1] < 2
+    metadata["is_univariate"] = np.all([res[2]["is_univariate"] for res in check_res])
+    metadata["is_equally_spaced"] = np.all(
+        [res[2]["is_equally_spaced"] for res in check_res]
+    )
+    metadata["is_empty"] = np.any([res[2]["is_empty"] for res in check_res])
     metadata["n_instances"] = len(inst_inds)
     metadata["is_one_series"] = len(inst_inds) == 1
     metadata["has_nans"] = obj.isna().values.any()
